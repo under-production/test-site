@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>画像閲覧ビューア</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      background-color: #f0f0f0;
+      overflow: hidden;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .image-container {
+      max-width: 80%;
+      max-height: 80vh;
+      cursor: pointer;
+    }
+
+    .image-container img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+
+    .fullscreen-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background-color: rgba(0, 0, 0, 0.95);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      z-index: 9999;
+      touch-action: none;
+    }
+
+    .fullscreen-overlay.active {
+      display: flex;
+    }
+
+    .fullscreen-overlay img {
+      max-width: 100vw;
+      max-height: 100vh;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      transform-origin: center center;
+      cursor: grab;
+      will-change: transform;
+    }
+
+    .fullscreen-overlay img:active {
+      cursor: grabbing;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="image-container" id="normalContainer">
+    <img src="sample.jpg" alt="サンプル画像" id="normalImage">
+  </div>
+
+  <div class="fullscreen-overlay" id="fullscreenOverlay">
+    <img src="sample.jpg" alt="拡大画像" id="fullscreenImage">
+  </div>
+
+  <script>
+    const normalContainer = document.getElementById('normalContainer');
+    const overlay = document.getElementById('fullscreenOverlay');
+    const fsImage = document.getElementById('fullscreenImage');
+
+    const WAIT_TIME = 300; // 0.3秒
+    let isCoolingDown = false; // クールダウン中フラグ
+
+    let scale = 1;
+    let translateX = 0;
+    let translateY = 0;
+    let isDragging = false;
+    let startX = 0;
+    let startY = 0;
+
+    let initialPinchDistance = null;
+    let initialScale = 1;
+
+    let lastTapNormal = 0;
+    let lastTapFS = 0;
+
+    let hasMoved = false;
+    let isPinching = false;
+
+    // クールダウンを開始する共通関数
+    function startCooldown() {
+      isCoolingDown = true;
+      setTimeout(() => {
+        isCoolingDown = false;
+      }, WAIT_TIME);
+    }
+
+    function updateTransform(smooth = false) {
+      fsImage.style.transition = smooth ? 'transform 0.2s ease-out' : 'none';
+      fsImage.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
+    }
+
+    function resetTransform() {
+      scale = 1;
+      translateX = 0;
+      translateY = 0;
+      updateTransform(true);
+    }
+
+    function openFullscreen() {
+      overlay.classList.add('active');
+      resetTransform();
+      startCooldown(); // 全画面化後に0.3秒待機
+    }
+
+    function closeFullscreen() {
+      overlay.classList.remove('active');
+      resetTransform();
+      lastTapNormal = 0;
+      lastTapFS = 0;
+      startCooldown(); // 全画面終了後に0.3秒待機
+    }
+
+    // ----------------------------------------------------
+    // 1. 通常画面の全画面化
+    // ----------------------------------------------------
+    normalContainer.addEventListener('dblclick', () => {
+      if (!isCoolingDown) openFullscreen();
+    });
+
+    normalContainer.addEventListener('touchend', (e) => {
+      if (isCoolingDown) return;
+      const now = Date.now();
+      if (now - lastTapNormal < 300 && lastTapNormal !== 0) {
+        e.preventDefault();
+        openFullscreen();
+      }
+      lastTapNormal = now;
+    });
+
+    // ----------------------------------------------------
+    // 2. 全画面時の操作（PC：マウス）
+    // ----------------------------------------------------
+    overlay.addEventListener('mousedown', (e) => {
+      if (isCoolingDown) return;
+      e.preventDefault();
+      isDragging = true;
+      startX = e.clientX - translateX;
+      startY = e.clientY - translateY;
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!isDragging || !overlay.classList.contains('active') || isCoolingDown) return;
+      translateX = e.clientX - startX;
+      translateY = e.clientY - startY;
+      hasMoved = true;
+      updateTransform();
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (isDragging && hasMoved) {
+        startCooldown(); // マウスドラッグ終了後に0.3秒待機
+      }
+      isDragging = false;
+      hasMoved = false;
+    });
+
+    overlay.addEventListener('dblclick', (e) => {
+      if (isCoolingDown) return;
+      e.stopPropagation();
+      closeFullscreen();
+    });
+
+    // ----------------------------------------------------
+    // 3. 全画面時の操作（スマホ：タッチ）
+    // ----------------------------------------------------
+    overlay.addEventListener('touchstart', (e) => {
+      if (isCoolingDown) return;
+
+      if (e.touches.length === 1) {
+        if (!isPinching) {
+          isDragging = true;
+          hasMoved = false;
+          startX = e.touches[0].clientX - translateX;
+          startY = e.touches[0].clientY - translateY;
+        }
+      } else if (e.touches.length === 2) {
+        isDragging = false;
+        isPinching = true;
+        initialPinchDistance = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        initialScale = scale;
+      }
+    });
+
+    overlay.addEventListener('touchmove', (e) => {
+      if (isCoolingDown) return;
+      e.preventDefault();
+
+      if (e.touches.length === 1 && isDragging && !isPinching) {
+        translateX = e.touches[0].clientX - startX;
+        translateY = e.touches[0].clientY - startY;
+        hasMoved = true;
+        updateTransform();
+      } else if (e.touches.length === 2 && initialPinchDistance) {
+        const currentDistance = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        scale = Math.max(0.5, Math.min(initialScale * (currentDistance / initialPinchDistance), 5));
+        updateTransform();
+      }
+    });
+
+    overlay.addEventListener('touchend', (e) => {
+      if (isCoolingDown) return;
+
+      if (e.touches.length === 0) {
+        isDragging = false;
+
+        // ピンチ終了時：クールダウンを入れて誤動作をカット
+        if (isPinching) {
+          initialPinchDistance = null;
+          isPinching = false;
+          startCooldown();
+          return;
+        }
+
+        // 1本指ドラッグ終了時：クールダウンを入れて誤動作をカット
+        if (hasMoved) {
+          hasMoved = false;
+          startCooldown();
+          return;
+        }
+
+        // ダブルタップ判定
+        const now = Date.now();
+        const tapInterval = now - lastTapFS;
+
+        if (tapInterval < 300 && tapInterval > 0) {
+          closeFullscreen();
+        }
+        lastTapFS = now;
+      }
+    });
+  </script>
+</body>
+</html>
